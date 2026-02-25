@@ -1,0 +1,15 @@
+[Unit]
+Description=SLIME actuator-min (reference) — owns /run/slime/egress.sock
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=actuator
+Group=slime-actuator
+ExecStart=/usr/local/bin/actuator-min
+Restart=no
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

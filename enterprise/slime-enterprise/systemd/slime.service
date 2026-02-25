@@ -1,0 +1,15 @@
+[Unit]
+Description=SLIME runner — fail-closed membrane
+After=actuator.service
+Requires=actuator.service
+
+[Service]
+Type=simple
+User=slime
+Group=slime-actuator
+ExecStart=/usr/local/bin/slime-runner
+Restart=no
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

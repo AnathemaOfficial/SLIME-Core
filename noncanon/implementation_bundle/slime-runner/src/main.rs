@@ -1,9 +1,59 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::net::UnixStream;
-use std::thread;
-use std::time::Duration;
+use std::process;
 use std::sync::{Mutex, OnceLock};
+use std::thread;
+use std::time::{Duration, Instant};
+
+//
+// -------------------- Hardening Constants (Phase 2) --------------------
+//
+
+const MAX_HEADER_BYTES: usize = 8 * 1024; // 8KB
+const MAX_BODY_BYTES: usize = 64 * 1024; // 64KB
+const READ_TIMEOUT_SECS: u64 = 2;
+
+//
+// -------------------- Rate Limit (Phase 2) --------------------
+//
+
+const RL_CAPACITY: u32 = 20;        // max burst
+const RL_REFILL_PER_SEC: u32 = 10;  // steady rate
+
+static RL: OnceLock<Mutex<RateLimiter>> = OnceLock::new();
+
+struct RateLimiter {
+    tokens: u32,
+    last: Instant,
+}
+
+fn rl_init() {
+    let _ = RL.set(Mutex::new(RateLimiter {
+        tokens: RL_CAPACITY,
+        last: Instant::now(),
+    }));
+}
+
+fn rl_allow() -> bool {
+    let rl = RL.get().expect("rate limiter not initialized");
+    let mut g = rl.lock().unwrap();
+
+    // refill per whole-second elapsed (deterministic enough, minimal)
+    let now = Instant::now();
+    let elapsed = now.duration_since(g.last).as_secs();
+    if elapsed > 0 {
+        let add = elapsed.saturating_mul(RL_REFILL_PER_SEC as u64) as u32;
+        g.tokens = (g.tokens + add).min(RL_CAPACITY);
+        g.last = now;
+    }
+
+    if g.tokens == 0 {
+        return false;
+    }
+    g.tokens -= 1;
+    true
+}
 
 //
 // -------------------- Types --------------------
@@ -22,32 +72,73 @@ struct ActionRequest {
 }
 
 //
-// -------------------- Utilities --------------------
+// -------------------- Ingress Read (Hardened) --------------------
 //
 
-fn read_http_body(mut stream: &TcpStream) -> Vec<u8> {
-    let mut buf = [0u8; 8192];
-    let mut out = Vec::new();
+fn read_http_body_hardened(stream: &mut TcpStream) -> Option<Vec<u8>> {
+    // Slow-loris defense: bounded read time
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(READ_TIMEOUT_SECS)));
 
-    // basic, manual HTTP read
-    if let Ok(n) = stream.peek(&mut buf) {
-        if n == 0 { return out; }
+    let mut buf = Vec::<u8>::new();
+    let mut tmp = [0u8; 1024];
+
+    // 1) Read headers up to MAX_HEADER_BYTES, stop at \r\n\r\n
+    while buf.len() < MAX_HEADER_BYTES {
+        let n = stream.read(&mut tmp).ok()?;
+        if n == 0 {
+            return None;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+
+        // Detect end of headers
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
     }
 
-    // read a bit
-    let mut tmp = [0u8; 4096];
-    if let Ok(n) = stream.read(&mut tmp) {
-        out.extend_from_slice(&tmp[..n]);
+    // Header too big or never terminated
+    if buf.len() >= MAX_HEADER_BYTES {
+        return None;
     }
 
-    out
+    // 2) Parse Content-Length (required)
+    let header_text = std::str::from_utf8(&buf).ok()?;
+    let content_length = header_text
+        .lines()
+        .find(|l| l.to_ascii_lowercase().starts_with("content-length:"))
+        .and_then(|l| l.splitn(2, ':').nth(1))
+        .and_then(|v| v.trim().parse::<usize>().ok())?;
+
+    if content_length > MAX_BODY_BYTES {
+        return None;
+    }
+
+    // 3) Read exactly content_length bytes of body
+    let mut body = Vec::with_capacity(content_length);
+    while body.len() < content_length {
+        let n = stream.read(&mut tmp).ok()?;
+        if n == 0 {
+            return None;
+        }
+        body.extend_from_slice(&tmp[..n]);
+
+        if body.len() > MAX_BODY_BYTES {
+            return None;
+        }
+    }
+
+    Some(body)
 }
 
-fn parse_request(raw: &[u8]) -> Option<ActionRequest> {
-    let text = std::str::from_utf8(raw).ok()?;
+//
+// -------------------- Request Parse (Dummy) --------------------
+//
+
+fn parse_request(body: &[u8]) -> Option<ActionRequest> {
+    let text = std::str::from_utf8(body).ok()?;
 
     // extremely dumb parse (dummy)
-    // expects {"domain":"test","magnitude":10,"payload":""}
+    // expects something like: {"domain":"test","magnitude":10,...}
     let domain = if let Some(p) = text.find("\"domain\"") {
         let s = &text[p..];
         let q1 = s.find('"')?;
@@ -64,12 +155,16 @@ fn parse_request(raw: &[u8]) -> Option<ActionRequest> {
 
     let magnitude = if let Some(p) = text.find("\"magnitude\":") {
         let s = &text[p + 12..];
-        s.parse::<u64>().unwrap_or(0)
+        s.trim_start()
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .parse::<u64>()
+            .unwrap_or(0)
     } else {
         return None;
     };
 
-    // deterministic domain_id: hash domain string to u64 (dummy)
     let domain_id = fnv1a_64(domain.as_bytes());
 
     Some(ActionRequest { domain_id, magnitude })
@@ -90,8 +185,6 @@ fn fnv1a_64(data: &[u8]) -> u64 {
 
 mod egress {
     use super::*;
-    use std::io::Write;
-    use std::process;
 
     // Canonical, non-configurable path (SLIME v0)
     const SOCKET_PATH: &str = "/run/slime/egress.sock";
@@ -130,7 +223,7 @@ mod egress {
 }
 
 //
-// -------------------- Ingress (Dummy HTTP) --------------------
+// -------------------- Ingress (Dummy HTTP, Hardened + RL gate) --------------------
 //
 
 mod ingress {
@@ -147,11 +240,23 @@ mod ingress {
     }
 
     fn handle(mut stream: TcpStream) {
-        // read request
-        let raw = read_http_body(&stream);
+        // Rate-limit gate (global, no config)
+        if !crate::rl_allow() {
+            let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
+            return;
+        }
+
+        // Hardened read: headers capped, body capped, timeout enforced, Content-Length required
+        let body = match crate::read_http_body_hardened(&mut stream) {
+            Some(b) => b,
+            None => {
+                let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
+                return;
+            }
+        };
 
         // parse
-        let req = match parse_request(&raw) {
+        let req = match crate::parse_request(&body) {
             Some(r) => r,
             None => {
                 let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
@@ -179,6 +284,9 @@ mod ingress {
 fn main() {
     // Canon prerequisite: actuator socket must exist and be connectable at boot.
     crate::egress::init_fail_closed();
+
+    // Phase 2 hardening: rate limiter init (no config, in-memory only)
+    rl_init();
 
     thread::spawn(|| ingress::start());
 

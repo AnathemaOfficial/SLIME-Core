@@ -73,7 +73,7 @@ When AB-S authorizes an action:
 
 **Ordering:** Preserved (FIFO)  
 **Buffering:** Kernel socket buffer (typically 64KB)  
-**Framing:** None (fixed 24-byte messages)
+**Framing:** None (fixed 32-byte messages)
 
 ### Impossibilities
 
@@ -126,7 +126,7 @@ This is **fail-closed**.
 The environment must:
 
 1. **Create actuator bridge** that connects to `/run/slime/egress.sock`
-2. **Read 24-byte `AuthorizedEffect` messages** from socket
+2. **Read 32-byte `AuthorizedEffect` messages** from socket
 3. **Map effect to actuation** based on domain_id and magnitude
 4. **Perform mechanical actuation** in the world
 5. **Handle disconnection** (reconnect logic is environment's responsibility)

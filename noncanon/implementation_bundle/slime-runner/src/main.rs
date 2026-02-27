@@ -3,8 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::os::unix::net::UnixStream;
 use std::process;
 use std::sync::{Mutex, OnceLock};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 //
 // -------------------- Hardening Constants (Phase 2) --------------------
@@ -14,48 +13,6 @@ const MAX_HEADER_BYTES: usize = 8 * 1024; // 8KB
 const MAX_BODY_BYTES: usize = 64 * 1024; // 64KB
 const READ_TIMEOUT_SECS: u64 = 2;
 
-//
-// -------------------- Rate Limit (Phase 2) --------------------
-//
-
-const RL_CAPACITY: u32 = 20;        // max burst
-const RL_REFILL_PER_SEC: u32 = 10;  // steady rate
-
-static RL: OnceLock<Mutex<RateLimiter>> = OnceLock::new();
-
-struct RateLimiter {
-    tokens: u32,
-    last: Instant,
-}
-
-fn rl_init() {
-    let _ = RL.set(Mutex::new(RateLimiter {
-        tokens: RL_CAPACITY,
-        last: Instant::now(),
-    }));
-}
-
-fn rl_allow() -> bool {
-    let rl = RL.get().expect("rate limiter not initialized");
-    let mut g = rl.lock().unwrap();
-
-    // refill per whole-second elapsed (deterministic enough, minimal)
-    let now = Instant::now();
-    let elapsed = now.duration_since(g.last).as_secs();
-    if elapsed > 0 {
-        let add = elapsed.saturating_mul(RL_REFILL_PER_SEC as u64) as u32;
-        g.tokens = (g.tokens + add).min(RL_CAPACITY);
-        g.last = now;
-    }
-
-    if g.tokens == 0 {
-        return false;
-    }
-    g.tokens -= 1;
-    true
-}
-
-//
 // -------------------- Types --------------------
 //
 
@@ -83,6 +40,7 @@ fn read_http_body_hardened(stream: &mut TcpStream) -> Option<Vec<u8>> {
     let mut tmp = [0u8; 1024];
 
     // 1) Read headers up to MAX_HEADER_BYTES, stop at \r\n\r\n
+    let mut header_end = None;
     while buf.len() < MAX_HEADER_BYTES {
         let n = stream.read(&mut tmp).ok()?;
         if n == 0 {
@@ -91,18 +49,20 @@ fn read_http_body_hardened(stream: &mut TcpStream) -> Option<Vec<u8>> {
         buf.extend_from_slice(&tmp[..n]);
 
         // Detect end of headers
-        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            header_end = Some(pos + 4);
             break;
         }
     }
 
     // Header too big or never terminated
-    if buf.len() >= MAX_HEADER_BYTES {
+    let header_end = header_end?;
+    if header_end >= MAX_HEADER_BYTES {
         return None;
     }
 
     // 2) Parse Content-Length (required)
-    let header_text = std::str::from_utf8(&buf).ok()?;
+    let header_text = std::str::from_utf8(&buf[..header_end]).ok()?;
     let content_length = header_text
         .lines()
         .find(|l| l.to_ascii_lowercase().starts_with("content-length:"))
@@ -115,6 +75,9 @@ fn read_http_body_hardened(stream: &mut TcpStream) -> Option<Vec<u8>> {
 
     // 3) Read exactly content_length bytes of body
     let mut body = Vec::with_capacity(content_length);
+    let already_read = &buf[header_end..];
+    let preloaded = already_read.len().min(content_length);
+    body.extend_from_slice(&already_read[..preloaded]);
     while body.len() < content_length {
         let n = stream.read(&mut tmp).ok()?;
         if n == 0 {
@@ -167,7 +130,10 @@ fn parse_request(body: &[u8]) -> Option<ActionRequest> {
 
     let domain_id = fnv1a_64(domain.as_bytes());
 
-    Some(ActionRequest { domain_id, magnitude })
+    Some(ActionRequest {
+        domain_id,
+        magnitude,
+    })
 }
 
 fn fnv1a_64(data: &[u8]) -> u64 {
@@ -228,6 +194,10 @@ mod egress {
 
 mod ingress {
     use super::*;
+    const AUTHORIZED_RESPONSE: &[u8] =
+        b"HTTP/1.1 200 OK\r\nContent-Length: 23\r\n\r\n{\"status\":\"AUTHORIZED\"}";
+    const IMPOSSIBLE_RESPONSE: &[u8] =
+        b"HTTP/1.1 200 OK\r\nContent-Length: 23\r\n\r\n{\"status\":\"IMPOSSIBLE\"}";
 
     pub fn start() {
         let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
@@ -240,17 +210,11 @@ mod ingress {
     }
 
     fn handle(mut stream: TcpStream) {
-        // Rate-limit gate (global, no config)
-        if !crate::rl_allow() {
-            let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
-            return;
-        }
-
         // Hardened read: headers capped, body capped, timeout enforced, Content-Length required
         let body = match crate::read_http_body_hardened(&mut stream) {
             Some(b) => b,
             None => {
-                let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
+                let _ = stream.write_all(IMPOSSIBLE_RESPONSE);
                 return;
             }
         };
@@ -259,7 +223,7 @@ mod ingress {
         let req = match crate::parse_request(&body) {
             Some(r) => r,
             None => {
-                let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
+                let _ = stream.write_all(IMPOSSIBLE_RESPONSE);
                 return;
             }
         };
@@ -273,7 +237,36 @@ mod ingress {
 
         crate::egress::apply(effect);
 
-        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n");
+        let _ = stream.write_all(AUTHORIZED_RESPONSE);
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+
+        #[test]
+        fn invalid_request_returns_impossible() {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+
+            let t = std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                handle(stream);
+            });
+
+            let mut client = TcpStream::connect(addr).unwrap();
+            let _ = client.write_all(b"POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}");
+            let _ = client.shutdown(std::net::Shutdown::Write);
+
+            let mut resp = Vec::new();
+            let _ = client.read_to_end(&mut resp);
+            t.join().unwrap();
+
+            let text = String::from_utf8(resp).unwrap();
+            assert!(text.contains("{\"status\":\"IMPOSSIBLE\"}"));
+        }
     }
 }
 
@@ -285,12 +278,32 @@ fn main() {
     // Canon prerequisite: actuator socket must exist and be connectable at boot.
     crate::egress::init_fail_closed();
 
-    // Phase 2 hardening: rate limiter init (no config, in-memory only)
-    rl_init();
+    ingress::start();
+}
 
-    thread::spawn(|| ingress::start());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::net::{TcpListener, TcpStream};
 
-    loop {
-        thread::sleep(Duration::from_secs(1));
+    #[test]
+    fn read_http_body_hardened_accepts_preloaded_body_bytes() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let t = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let body = read_http_body_hardened(&mut stream).unwrap();
+            assert_eq!(body, br#"{"domain":"t","magnitude":1}"#);
+        });
+
+        let mut client = TcpStream::connect(addr).unwrap();
+        let req =
+            b"POST / HTTP/1.1\r\nContent-Length: 28\r\n\r\n{\"domain\":\"t\",\"magnitude\":1}";
+        let _ = client.write_all(req);
+        let _ = client.shutdown(std::net::Shutdown::Write);
+
+        t.join().unwrap();
     }
 }

@@ -40,32 +40,27 @@ fn main() -> std::io::Result<()> {
                     eprintln!("actuator-min: set_read_timeout failed: {e}");
                     continue;
                 }
-                // Process fixed 32-byte frames on this connection until timeout/EOF/error.
-                loop {
-                    let mut buf = [0u8; 32];
-                    if let Err(e) = s.read_exact(&mut buf) {
-                        if matches!(e.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) {
-                            eprintln!("actuator-min: read timeout; dropping connection");
-                        } else if matches!(e.kind(), ErrorKind::UnexpectedEof) {
-                            // Peer closed before a full 32-byte frame was available.
-                        } else {
-                            eprintln!("actuator-min: read_exact failed: {e}");
-                        }
-                        break;
+                let mut buf = [0u8; 32];
+                if let Err(e) = s.read_exact(&mut buf) {
+                    if matches!(e.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) {
+                        eprintln!("actuator-min: read timeout; dropping connection");
+                    } else {
+                        eprintln!("actuator-min: read_exact failed: {e}");
                     }
-                    // Hex encode 32 bytes
-                    let mut hex = String::with_capacity(64);
-                    for b in buf {
-                        hex.push_str(&format!("{:02x}", b));
-                    }
+                    continue;
+                }
+                // Hex encode 32 bytes
+                let mut hex = String::with_capacity(64);
+                for b in buf {
+                    hex.push_str(&format!("{:02x}", b));
+                }
 
-                    // Log line (no feedback to SLIME)
-                    let line = format!("{hex}\n");
-                    eprint!("actuator-min event: {}", line);
+                // Log line (no feedback to SLIME)
+                let line = format!("{hex}\n");
+                eprint!("actuator-min event: {}", line);
 
-                    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(EVENT_LOG) {
-                        let _ = f.write_all(line.as_bytes());
-                    }
+                if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(EVENT_LOG) {
+                    let _ = f.write_all(line.as_bytes());
                 }
             }
             Err(e) => {

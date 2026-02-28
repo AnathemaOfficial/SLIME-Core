@@ -56,6 +56,8 @@ actuator slime-actuator 770 /run/slime
 actuator slime-actuator 660 /run/slime/egress.sock
 
 === last actuator logs ===
+Feb 23 18:18:35 syf-node actuator-binary[22649]: egress bytes=0
+Feb 23 18:18:38 syf-node actuator-binary[22649]: egress bytes=0
 Feb 23 18:25:12 syf-node actuator-binary[22649]: egress bytes=32
 Feb 23 18:27:38 syf-node systemd[1]: Stopping actuator.service - SLIME External Actuator...
 Feb 23 18:27:38 syf-node systemd[1]: actuator.service: Deactivated successfully.

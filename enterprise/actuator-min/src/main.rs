@@ -40,12 +40,15 @@ fn main() -> std::io::Result<()> {
                     eprintln!("actuator-min: set_read_timeout failed: {e}");
                     continue;
                 }
+                // Process fixed 32-byte frames on this connection until timeout/EOF/error.
                 loop {
                     let mut buf = [0u8; 32];
                     if let Err(e) = s.read_exact(&mut buf) {
                         if matches!(e.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) {
                             eprintln!("actuator-min: read timeout; dropping connection");
-                        } else if !matches!(e.kind(), ErrorKind::UnexpectedEof) {
+                        } else if matches!(e.kind(), ErrorKind::UnexpectedEof) {
+                            // Peer closed before a full 32-byte frame was available.
+                        } else {
                             eprintln!("actuator-min: read_exact failed: {e}");
                         }
                         break;

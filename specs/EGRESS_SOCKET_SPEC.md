@@ -170,6 +170,7 @@ def actuator_bridge():
             
             # Unpack AuthorizedEffect
             domain_id, magnitude, token = struct.unpack('<QQ16s', data)
+            # token is the full 128-bit actuation token as 16 raw bytes (LE)
             
             # Perform actuation
             actuate(domain_id, magnitude)
@@ -273,8 +274,8 @@ fn main() -> std::io::Result<()> {
                 let mut token_bytes = [0u8; 16];
                 token_bytes.copy_from_slice(&buffer[16..32]);
                 let effect = AuthorizedEffect {
-                    domain_id: u64::from_le_bytes(buffer[0..8].try_into().unwrap()),
-                    magnitude: u64::from_le_bytes(buffer[8..16].try_into().unwrap()),
+                    domain_id: u64::from_le_bytes(buffer[0..8].try_into().expect("fixed 8-byte domain_id slice")),
+                    magnitude: u64::from_le_bytes(buffer[8..16].try_into().expect("fixed 8-byte magnitude slice")),
                     actuation_token: u128::from_le_bytes(token_bytes),
                 };
                 actuate(&effect);

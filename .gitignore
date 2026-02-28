@@ -15,3 +15,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# local builds
+local_release_artifacts/

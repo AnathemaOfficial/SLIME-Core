@@ -221,7 +221,6 @@ mod ingress {
                 return;
             }
         };
-
         // parse
         let req = match crate::parse_request(&body) {
             Some(r) => r,
@@ -230,18 +229,22 @@ mod ingress {
                 return;
             }
         };
+        // decision (NONCANON mini AB-S):
+        // authorize only if (domain == "test") and magnitude > 0
 
-        // decision: always AUTHORIZED for dummy
-        let effect = AuthorizedEffect {
-            domain_id: req.domain_id,
-            magnitude: req.magnitude,
-            actuation_token: 0xABCD_EF01_2345_6789_ABCD_EF01_2345_6789u128,
-        };
+        if req.domain_id == fnv1a_64(b"test") && req.magnitude > 0 {
+            let effect = AuthorizedEffect {
+                domain_id: req.domain_id,
+                magnitude: req.magnitude,
+                actuation_token: 0xABCD_EF01_2345_6789_ABCD_EF01_2345_6789u128,
+            };
 
-        crate::egress::apply(effect);
-
-        write_status_response(&mut stream, AUTHORIZED_STATUS);
-    }
+            crate::egress::apply(effect);
+            write_status_response(&mut stream, AUTHORIZED_STATUS);
+        } else {
+            write_status_response(&mut stream, IMPOSSIBLE_STATUS);
+}
+}
 
     #[cfg(test)]
     mod tests {

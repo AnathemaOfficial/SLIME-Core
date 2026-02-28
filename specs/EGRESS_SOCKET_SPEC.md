@@ -164,8 +164,8 @@ def actuator_bridge():
     try:
         while True:
             # Read exactly 32 bytes
-            data = sock.recv(24)
-            if len(data) != 24:
+            data = sock.recv(32)
+            if len(data) != 32:
                 break
             
             # Unpack AuthorizedEffect

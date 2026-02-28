@@ -1,3 +1,9 @@
+## Noncanonical / Legacy note
+
+`actuator-dummy/` contains a legacy illustration bundle and is **NOT** the canonical reference.
+For the hardened runner, use `slime-runner/`.
+For the minimal enterprise actuator, use `enterprise/actuator-min/`.
+
 Deployment artifacts are intentionally withheld.
 SLIME is a structural law-layer description, not a runnable product.
 Any execution environment is non-canon and must not be treated as authoritative.

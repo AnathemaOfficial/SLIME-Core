@@ -1,3 +1,20 @@
+// ============================================================================
+// NONCANON / LEGACY IMPLEMENTATION BUNDLE
+//
+// This file is NOT the canonical SLIME v0 runner nor the enterprise actuator.
+//
+// Canonical references:
+// - Runner (hardened): noncanon/implementation_bundle/slime-runner/
+// - Enterprise actuator (minimal): enterprise/actuator-min/
+//
+// This legacy bundle is kept for historical / illustration purposes only.
+// Do NOT use it as a security reference.
+// ============================================================================
+//
+// NOTE:
+// - The canonical SLIME v0 state is sealed via tags (e.g. slime-v0-hardening-phase2b).
+// - Known issues in legacy code are addressed in the canonical runner/actuator.
+// ============================================================================
 // =============================================================================
 // SLIME v0 — Runner (Linux std)
 // Canon: CANON.md / ARCHITECTURE.md / INGRESS_API_SPEC.md / EGRESS_SOCKET_SPEC.md

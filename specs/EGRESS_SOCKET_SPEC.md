@@ -46,7 +46,7 @@ typedef struct {
 } __attribute__((packed)) AuthorizedEffect;
 ```
 
-**Size:** 24 bytes  
+**Size:** 32 bytes  
 **Alignment:** Packed (no padding)  
 **Byte order:** Little-endian (x86_64 native)
 
@@ -67,7 +67,7 @@ AB-S authorizes based on domain and magnitude, not payload content.
 
 When AB-S authorizes an action:
 1. SLIME constructs `AuthorizedEffect` structure
-2. SLIME writes 24 bytes to socket (single write call)
+2. SLIME writes 32 bytes to socket (single write call)
 3. SLIME does not wait for acknowledgment
 4. SLIME continues to next action
 
@@ -140,7 +140,7 @@ The environment must:
 
 SLIME guarantees:
 - Socket exists while SLIME is running
-- Every write is exactly 24 bytes
+- Every write is exactly 32 bytes
 - Effects are written in order of authorization
 - No writes occur for impossibilities
 - Authorization token is cryptographically valid
@@ -163,7 +163,7 @@ def actuator_bridge():
     
     try:
         while True:
-            # Read exactly 24 bytes
+            # Read exactly 32 bytes
             data = sock.recv(24)
             if len(data) != 24:
                 break

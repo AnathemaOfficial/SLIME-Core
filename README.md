@@ -29,6 +29,16 @@ or governance-based system is incorrect.
 
 ---
 
+## Repository Structure
+
+The root directory and `specs/` define the canonical law-layer.
+
+All executable, deployable, integration, dashboard, adversarial, and enterprise artifacts reside exclusively under `noncanon/`.
+
+Anything outside `noncanon/` is documentation-only and defines no runtime behavior.
+
+---
+
 ## Foundational Context
 
 SLIME is part of a broader invariant-driven architecture:

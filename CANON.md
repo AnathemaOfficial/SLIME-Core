@@ -19,6 +19,10 @@ SLIME applies a law that has already been decided.
 
 ---
 
+All executable, deployable, integration, or enterprise artifacts reside exclusively under `noncanon/`. Nothing outside `noncanon/` is executable or configurable.
+
+---
+
 ## 2. Position in the SYF Architecture
 
 SLIME v0 sits **between existing systems and the world**.

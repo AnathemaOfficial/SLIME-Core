@@ -1,6 +1,5 @@
 
-<img width="1411" height="898" alt="SLIME logo 2" src="https://github.com/user-attachments/assets/8a5cc8a9-d986-4224-bb4d-5b213dbb6537" />
-
+<img width="1411" height="898" alt="SLIME logo 2" src="https://github.com/user-attachments/assets/9f3b81aa-bb97-4090-af2c-4583337228ab" />
 ---
 
 ⚠️ Before reading this repository:

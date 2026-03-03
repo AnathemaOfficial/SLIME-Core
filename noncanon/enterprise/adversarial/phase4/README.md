@@ -126,6 +126,18 @@ Run order:
 
 ---
 
+## Regression Guards (Post AB-S Hardening)
+
+### T09 — Domain ID Non-Truncation (proposed)
+
+- **Invariant:** No component in the pipeline truncates `domain_id` below 64 bits
+- **Background:** AB-S `Domain` was widened from `u16` to `u64`. SLIME egress ABI has always been `u64`. This test guards against regression where an intermediate layer silently casts to `u16` or `u32`.
+- **Method:** Send an action with `domain_id` > 65535 (e.g., `"domain": "large_domain_test_value_that_hashes_above_65535"`) → verify the egress frame contains the full 64-bit `domain_id` (not a truncated value)
+- **FAIL condition:** Egress `domain_id` differs from `hash64(domain) & 0xFFFFFFFF` (canon mask) or has been further truncated to 16 bits
+- **Scope:** Guards SLIME runner, ingress proxy, and any enterprise middleware
+
+---
+
 ## Notes
 
 - All tests use `"payload":"AA=="` (valid base64) for ingress requests

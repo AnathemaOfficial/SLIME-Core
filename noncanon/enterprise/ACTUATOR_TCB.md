@@ -433,4 +433,23 @@ V1:  [domain_id: u64] [magnitude: u64] [mac: u128]
 
 ---
 
+## AB-S ↔ SLIME Type Mapping
+
+Anathema-Breaker (AB-S) is the formal law-layer that SLIME instantiates at runtime. After AB-S hardening, the type widths are:
+
+| Concept | AB-S (Rust) | SLIME Egress ABI | Notes |
+|---|---|---|---|
+| **Domain** | `Domain(u64)` — private field | `domain_id: u64` | No truncation permitted in pipeline |
+| **Magnitude** | `Magnitude(u64)` — private field | `magnitude: u64` | Direct mapping |
+| **Token** | N/A (AB-S is stateless) | `actuation_token: u128` | Token is SLIME-side metadata |
+| **Budget** | `Budget { capacity, progression }` — private fields | N/A (not in ABI) | Budget is AB-S internal only |
+
+**Critical constraints:**
+
+- **No truncation:** No component may cast `domain_id` or `magnitude` to a smaller type (u16, u32). The canonical pipeline is `u64` end-to-end.
+- **No budget exposure:** AB-S Budget fields are private. SLIME does not expose or forward budget state. The integrator reads budget via getters only.
+- **ABI is fixed:** The 32-byte egress frame (`u64 + u64 + u128`) is unchanged by AB-S hardening. AB-S types map directly to the ABI without conversion.
+
+---
+
 **END — ACTUATOR TCB / FIREPLANK-GUARD**

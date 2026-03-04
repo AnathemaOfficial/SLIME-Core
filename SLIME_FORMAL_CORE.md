@@ -138,3 +138,7 @@ SLIME v0 is a sealed invariant mapping from action request space to effect space
 
 Authorized effects manifest.
 All other requests resolve to non-existence.
+
+---
+
+

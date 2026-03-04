@@ -56,6 +56,8 @@ but parallel primitives built around invariant enforcement.
 
 See `FULL_STACK_CONFORMANCE.md` for cross-layer integration rules (Gate / Shield / AB / SLIME / Actuator).
 
+See `ARCHITECTURE_SECURITY_MODEL.md` for the full structural security model (monotonicity, irreversibility, binary enforcement, model limitations).
+
 ---
 
 ## Formal Specification

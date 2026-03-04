@@ -37,3 +37,7 @@ Expected:
 - T08_backpressure_stall.sh: PASS (no bypass during stall; drain on restart confirmed)
 - T07_domain_collision.sh: SKIP (requires sealed domain registry)
 - T06_replay_frame.sh: SKIP unless frame logger provides FRAME_HEX capture (future enterprise logger)
+
+## 5) Hotfix (runtime stability)
+- Runner reconnects once on egress write failure; if still failing → fail-closed (exit 1).
+- Prevents empty-reply crash while preserving 'no AUTHORIZED without egress'.

@@ -183,7 +183,10 @@ mod egress {
         buf[16..32].copy_from_slice(&effect.actuation_token.to_le_bytes());
 
         // Best-effort write. Any error is a silent drop (no feedback channel).
-        let _ = guard.write_all(&buf);
+        // CHANGE: write must succeed; otherwise fail-closed.
+        if guard.write_all(&buf).is_err() {
+            process::exit(1);
+        }
     }
 }
 

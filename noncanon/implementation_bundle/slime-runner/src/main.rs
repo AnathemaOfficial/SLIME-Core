@@ -183,9 +183,15 @@ mod egress {
         buf[16..32].copy_from_slice(&effect.actuation_token.to_le_bytes());
 
         // Best-effort write. Any error is a silent drop (no feedback channel).
-        // CHANGE: write must succeed; otherwise fail-closed.
+        // Write must succeed. If it fails, reconnect once, then fail-closed.
         if guard.write_all(&buf).is_err() {
-            process::exit(1);
+            // Replace the broken stream with a fresh connection.
+            let s = UnixStream::connect(SOCKET_PATH).unwrap_or_else(|_| process::exit(1));
+            *guard = s;
+
+            if guard.write_all(&buf).is_err() {
+                process::exit(1);
+            }
         }
     }
 }

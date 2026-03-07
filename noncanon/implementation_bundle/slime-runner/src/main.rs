@@ -395,6 +395,34 @@ mod ingress {
             let text = String::from_utf8(resp).unwrap();
             assert!(text.contains("{\"status\":\"IMPOSSIBLE\"}"));
         }
+
+        #[test]
+        fn zero_magnitude_returns_impossible() {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+
+            let t = std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                handle(stream);
+            });
+
+            let mut client = TcpStream::connect(addr).unwrap();
+            let body = br#"{"domain":"test","magnitude":0}"#;
+            let req = format!(
+                "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                std::str::from_utf8(body).unwrap()
+            );
+            let _ = client.write_all(req.as_bytes());
+            let _ = client.shutdown(std::net::Shutdown::Write);
+
+            let mut resp = Vec::new();
+            let _ = client.read_to_end(&mut resp);
+            t.join().unwrap();
+
+            let text = String::from_utf8(resp).unwrap();
+            assert!(text.contains("{\"status\":\"IMPOSSIBLE\"}"));
+        }
     }
 }
 
@@ -446,5 +474,62 @@ mod tests {
         assert!(resolve_domain("unknown").is_none());
         assert!(resolve_domain("").is_none());
         assert!(resolve_domain("PAYMENT").is_none());
+    }
+
+    #[test]
+    fn read_http_body_hardened_rejects_oversized_content_length() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let t = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let body = read_http_body_hardened(&mut stream);
+            assert!(body.is_none());
+        });
+
+        let mut client = TcpStream::connect(addr).unwrap();
+        let req = b"POST / HTTP/1.1\r\nContent-Length: 70000\r\n\r\n";
+        let _ = client.write_all(req);
+        let _ = client.shutdown(std::net::Shutdown::Write);
+
+        t.join().unwrap();
+    }
+
+    #[test]
+    fn read_http_body_hardened_rejects_missing_content_length() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let t = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let body = read_http_body_hardened(&mut stream);
+            assert!(body.is_none());
+        });
+
+        let mut client = TcpStream::connect(addr).unwrap();
+        let req = b"POST / HTTP/1.1\r\nHost: localhost\r\n\r\n{}";
+        let _ = client.write_all(req);
+        let _ = client.shutdown(std::net::Shutdown::Write);
+
+        t.join().unwrap();
+    }
+
+    #[test]
+    fn read_http_body_hardened_rejects_incomplete_body() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let t = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let body = read_http_body_hardened(&mut stream);
+            assert!(body.is_none());
+        });
+
+        let mut client = TcpStream::connect(addr).unwrap();
+        let req = b"POST / HTTP/1.1\r\nContent-Length: 20\r\n\r\n{}";
+        let _ = client.write_all(req);
+        let _ = client.shutdown(std::net::Shutdown::Write);
+
+        t.join().unwrap();
     }
 }

@@ -5,11 +5,67 @@ use std::process;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-// AB-S real engine
+// ---------------------------------------------------------------------------
+// Conditional resolver: real AB-S engine or stub
+// ---------------------------------------------------------------------------
+
+// Compile-time guard: exactly one resolver must be selected.
+#[cfg(all(feature = "stub_ab", feature = "real_ab"))]
+compile_error!("Features `stub_ab` and `real_ab` are mutually exclusive");
+
+#[cfg(not(any(feature = "stub_ab", feature = "real_ab")))]
+compile_error!("Either `stub_ab` or `real_ab` feature must be enabled");
+
+// Real AB-S engine (private dependency, not shipped with open-source SLIME)
+#[cfg(feature = "real_ab")]
 use anathema_breaker_core::pom::topology::Action as AbAction;
+#[cfg(feature = "real_ab")]
 use anathema_breaker_core::pom::topology::RZ;
+#[cfg(feature = "real_ab")]
 use anathema_breaker_core::pom::types::{Budget, Capacity, Domain, Magnitude, Progression};
+#[cfg(feature = "real_ab")]
 use anathema_breaker_core::pom::resolve_action::resolve_action;
+
+// Stub resolver (default for open-source builds)
+#[cfg(feature = "stub_ab")]
+mod stub_resolver {
+    //! Reference-only action resolver — NOT the real law engine.
+    //!
+    //! Simple capacity check: known domain + magnitude ≤ capacity → AUTHORIZED.
+    //! The real engine (Anathema-Breaker) uses formal typestate topology
+    //! (RZ → EP → IZ) and is not included in the open-source distribution.
+
+    #[derive(Clone, Copy)]
+    pub struct Domain(pub u16);
+
+    #[derive(Clone, Copy)]
+    pub struct Magnitude(pub u32);
+
+    #[derive(Clone, Copy)]
+    pub struct Capacity(pub u32);
+
+    #[derive(Clone, Copy)]
+    pub struct Progression(pub u32);
+
+    pub struct Budget {
+        pub capacity: Capacity,
+        pub progression: Progression,
+    }
+
+    /// Stub resolver: magnitude ≤ capacity → AUTHORIZED, else IMPOSSIBLE.
+    /// Budget is decremented on success (fresh per request in V1).
+    pub fn resolve(domain: Domain, magnitude: Magnitude, budget: &mut Budget) -> Option<u32> {
+        let _ = domain; // domain validity already checked by resolve_domain()
+        if magnitude.0 > budget.capacity.0 {
+            return None;
+        }
+        budget.capacity = Capacity(budget.capacity.0.saturating_sub(magnitude.0));
+        Some(magnitude.0)
+    }
+}
+
+#[cfg(feature = "stub_ab")]
+use stub_resolver::{Budget, Capacity, Domain, Magnitude, Progression};
 
 //
 // -------------------- Hardening Constants (Phase 2) --------------------
@@ -69,6 +125,27 @@ fn resolve_domain(name: &str) -> Option<Domain> {
 
 fn domain_to_egress_id(d: Domain) -> u64 {
     d.0 as u64
+}
+
+//
+// -------------------- Law Resolution Wrapper --------------------
+//
+
+/// Resolve an action through the selected law engine.
+/// Returns the applied magnitude on AUTHORIZED, or None on IMPOSSIBLE.
+fn resolve_law(domain: Domain, magnitude: Magnitude, budget: &mut Budget) -> Option<u32> {
+    #[cfg(feature = "real_ab")]
+    {
+        let action = AbAction::<RZ>::new(domain, magnitude);
+        match resolve_action(action, budget) {
+            Ok(effect) => Some(effect.magnitude_applied.0),
+            Err(_impossibility) => None,
+        }
+    }
+    #[cfg(feature = "stub_ab")]
+    {
+        stub_resolver::resolve(domain, magnitude, budget)
+    }
 }
 
 //
@@ -249,7 +326,7 @@ mod ingress {
             }
         };
 
-        // -- AB-S Resolution (Phase 6.3) ---------------------------------
+        // -- Law Resolution -----------------------------------------------
         //
         // 1. Resolve domain via sealed compile-time table
         let domain_str = std::str::from_utf8(&req.domain[..req.domain_len]).unwrap_or("");
@@ -274,19 +351,18 @@ mod ingress {
             progression: Progression(CORESPEC_PROGRESSION),
         };
 
-        // 4. Build Action<RZ> and resolve through AB-S
-        let action = AbAction::<RZ>::new(domain, magnitude);
-        match resolve_action(action, &mut budget) {
-            Ok(effect) => {
+        // 4. Resolve through selected law engine (real AB-S or stub)
+        match crate::resolve_law(domain, magnitude, &mut budget) {
+            Some(applied_mag) => {
                 let authorized = AuthorizedEffect {
                     domain_id: crate::domain_to_egress_id(domain),
-                    magnitude: effect.magnitude_applied.0 as u64,
+                    magnitude: applied_mag as u64,
                     actuation_token: 0u128,
                 };
                 crate::egress::apply(authorized);
                 write_status_response(&mut stream, AUTHORIZED_STATUS);
             }
-            Err(_impossibility) => {
+            None => {
                 write_status_response(&mut stream, IMPOSSIBLE_STATUS);
             }
         }

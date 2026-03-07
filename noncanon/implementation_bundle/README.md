@@ -1,28 +1,17 @@
-## Noncanonical / Legacy note
+## Reference Runner
 
-`actuator-dummy/` contains a legacy illustration bundle and is **NOT** the canonical reference.
-For the hardened runner, use `slime-runner/`.
-For the minimal enterprise actuator, use `enterprise/actuator-min/`.
+`slime-runner/` contains the open-source reference runner for SLIME.
 
-Deployment artifacts are intentionally withheld.
-SLIME is a structural law-layer description, not a runnable product.
-Any execution environment is non-canon and must not be treated as authoritative.
+By default it compiles with the `stub_ab` feature — a simple capacity-check
+resolver that demonstrates the SLIME interface without the proprietary
+Anathema-Breaker engine.
 
+To compile with the real law engine (requires private AB-S dependency):
+```
+cargo build --no-default-features --features real_ab
+```
 
+### Note
 
-\## Docs (NON-CANON)
-
-
-
-\- docs/ACTUATOR\_ARCHITECTURE.md
-
-\- docs/EGRESS\_VALIDATION.md
-
-\- docs/FAILURE\_MODES.md
-
-
-
-These documents are implementation guidance only and do not modify the canonical SLIME v0 artifact.
-
-
-
+This is a non-canonical implementation. Nothing in this directory modifies
+the SLIME v0 formal specification. The runner demonstrates form only.

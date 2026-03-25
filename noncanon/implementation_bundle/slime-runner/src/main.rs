@@ -1,30 +1,25 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::process;
+#[cfg(unix)]
 use std::sync::{Mutex, OnceLock};
+#[cfg(all(not(unix), feature = "integration_demo"))]
+use std::sync::OnceLock;
 use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // Conditional resolver: real AB-S engine or stub
 // ---------------------------------------------------------------------------
 
-// Compile-time guard: exactly one resolver must be selected.
-#[cfg(all(feature = "stub_ab", feature = "real_ab"))]
-compile_error!("Features `stub_ab` and `real_ab` are mutually exclusive");
+#[cfg(feature = "real_ab")]
+compile_error!(
+    "Feature `real_ab` is reserved for private enterprise wiring and is not available in the public slime-runner checkout"
+);
 
-#[cfg(not(any(feature = "stub_ab", feature = "real_ab")))]
-compile_error!("Either `stub_ab` or `real_ab` feature must be enabled");
-
-// Real AB-S engine (private dependency, not shipped with open-source SLIME)
-#[cfg(feature = "real_ab")]
-use anathema_breaker_core::pom::topology::Action as AbAction;
-#[cfg(feature = "real_ab")]
-use anathema_breaker_core::pom::topology::RZ;
-#[cfg(feature = "real_ab")]
-use anathema_breaker_core::pom::types::{Budget, Capacity, Domain, Magnitude, Progression};
-#[cfg(feature = "real_ab")]
-use anathema_breaker_core::pom::resolve_action::resolve_action;
+#[cfg(not(feature = "stub_ab"))]
+compile_error!("The public slime-runner checkout requires the default `stub_ab` resolver");
 
 // Stub resolver (default for open-source builds)
 #[cfg(feature = "stub_ab")]
@@ -45,8 +40,10 @@ mod stub_resolver {
     pub struct Capacity(pub u32);
 
     #[derive(Clone, Copy)]
+    #[allow(dead_code)]
     pub struct Progression(pub u32);
 
+    #[allow(dead_code)]
     pub struct Budget {
         pub capacity: Capacity,
         pub progression: Progression,
@@ -98,6 +95,7 @@ const CORESPEC_PROGRESSION: u32 = 1;
 // -------------------- Types --------------------
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(unix), allow(dead_code))]
 struct AuthorizedEffect {
     domain_id: u64,
     magnitude: u64,
@@ -131,21 +129,10 @@ fn domain_to_egress_id(d: Domain) -> u64 {
 // -------------------- Law Resolution Wrapper --------------------
 //
 
-/// Resolve an action through the selected law engine.
+/// Resolve an action through the public stub law engine.
 /// Returns the applied magnitude on AUTHORIZED, or None on IMPOSSIBLE.
 fn resolve_law(domain: Domain, magnitude: Magnitude, budget: &mut Budget) -> Option<u32> {
-    #[cfg(feature = "real_ab")]
-    {
-        let action = AbAction::<RZ>::new(domain, magnitude);
-        match resolve_action(action, budget) {
-            Ok(effect) => Some(effect.magnitude_applied.0),
-            Err(_impossibility) => None,
-        }
-    }
-    #[cfg(feature = "stub_ab")]
-    {
-        stub_resolver::resolve(domain, magnitude, budget)
-    }
+    stub_resolver::resolve(domain, magnitude, budget)
 }
 
 //
@@ -180,7 +167,7 @@ fn read_http_body_hardened(stream: &mut TcpStream) -> Option<Vec<u8>> {
     let content_length = header_text
         .lines()
         .find(|l| l.to_ascii_lowercase().starts_with("content-length:"))
-        .and_then(|l| l.splitn(2, ':').nth(1))
+        .and_then(|l| l.split_once(':').map(|x| x.1))
         .and_then(|v| v.trim().parse::<usize>().ok())?;
 
     if content_length > MAX_BODY_BYTES {
@@ -250,6 +237,7 @@ fn parse_request(body: &[u8]) -> Option<ActionRequest> {
 // -------------------- Egress (CANON v0) --------------------
 //
 
+#[cfg(unix)]
 mod egress {
     use super::*;
 
@@ -285,6 +273,67 @@ mod egress {
     }
 }
 
+#[cfg(not(unix))]
+mod egress {
+    use super::*;
+
+    #[cfg(feature = "integration_demo")]
+    static DEMO_EGRESS_FILE: OnceLock<String> = OnceLock::new();
+
+    #[cfg(feature = "integration_demo")]
+    fn encode_effect(effect: AuthorizedEffect) -> [u8; 32] {
+        let mut buf = [0u8; 32];
+        buf[0..8].copy_from_slice(&effect.domain_id.to_le_bytes());
+        buf[8..16].copy_from_slice(&effect.magnitude.to_le_bytes());
+        buf[16..32].copy_from_slice(&effect.actuation_token.to_le_bytes());
+        buf
+    }
+
+    #[cfg(feature = "integration_demo")]
+    pub fn init_fail_closed() {
+        let path = std::env::var("SLIME_DEMO_EGRESS_FILE").unwrap_or_else(|_| {
+            eprintln!("integration_demo requires SLIME_DEMO_EGRESS_FILE");
+            process::exit(1);
+        });
+
+        std::fs::File::create(&path).unwrap_or_else(|_| {
+            eprintln!("integration_demo could not create demo egress file");
+            process::exit(1);
+        });
+
+        let _ = DEMO_EGRESS_FILE.set(path);
+    }
+
+    #[cfg(feature = "integration_demo")]
+    pub fn apply(effect: AuthorizedEffect) {
+        let path = DEMO_EGRESS_FILE.get().unwrap_or_else(|| {
+            process::exit(1);
+        });
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)
+            .unwrap_or_else(|_| process::exit(1));
+
+        let buf = encode_effect(effect);
+        if file.write_all(&buf).is_err() {
+            process::exit(1);
+        }
+    }
+
+    #[cfg(not(feature = "integration_demo"))]
+    pub fn init_fail_closed() {
+        eprintln!("slime-runner requires a Unix target for egress socket support");
+        process::exit(1);
+    }
+
+    #[cfg(not(feature = "integration_demo"))]
+    pub fn apply(_effect: AuthorizedEffect) {
+        process::exit(1);
+    }
+}
+
 //
 // -------------------- Ingress --------------------
 //
@@ -302,10 +351,8 @@ mod ingress {
 
     pub fn start() {
         let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
-        for conn in listener.incoming() {
-            if let Ok(stream) = conn {
-                handle(stream);
-            }
+        for stream in listener.incoming().flatten() {
+            handle(stream);
         }
     }
 

@@ -20,7 +20,7 @@
 | **Ingress: format errors** | 400/413/500 with `error` + `message` fields | Always returns HTTP 200 + `IMPOSSIBLE` (flattened) | Same as runner |
 | **Ingress: impossibility** | HTTP 200 + `{"status":"IMPOSSIBLE"}` | HTTP 200 + `{"status":"IMPOSSIBLE"}` | Same |
 | **Ingress: payload (base64)** | Required field, max 64KB decoded, passed to AB-S | Ignored (parser reads `domain` + `magnitude` only) | Same as runner |
-| **AB-S Core** | Sealed, opaque, compile-time law, non-inspectable | Real AB-S engine via `resolve_action()` with compile-time CoreSpec constants (Phase 6.3) | Same as runner |
+| **AB-S Core** | Sealed, opaque, compile-time law, non-inspectable | Public checkout uses the `stub_ab` reference resolver. Private enterprise wiring may swap in the real AB-S engine, but that path is not shipped in this manifest. | Private deployment may embed the real AB-S engine |
 | **Egress: ABI** | 32 bytes LE: u64 + u64 + u128 | 32 bytes LE: u64 + u64 + u128 | Same |
 | **Egress: socket ownership** | Actuator owns socket (server/listener); SLIME connects as client | SLIME connects as client (fail-closed if absent) | `actuator.service` creates socket; `slime.service` requires it |
 | **Egress: socket path** | `/run/slime/egress.sock` (hardcoded) | `/run/slime/egress.sock` | Same |
@@ -47,20 +47,26 @@ The following divergences are **intentional** and expected in the noncanon harne
 
 ---
 
-## Resolved Divergences
+## Enterprise-Only Resolution Notes
 
-The following divergences existed in earlier runner versions and have been resolved:
+The following item is resolved only in private enterprise wiring, not in the
+public `slime-runner` checkout:
 
-1. **Stub AB-S** — The runner previously used a trivial decision function (`domain == "test" && magnitude > 0`) that demonstrated the *form* but not the *law*. The runner now delegates authorization to the real Anathema-Breaker core via `resolve_action(Action<RZ>, &mut Budget)`. Budget is constructed fresh per request (V1 statelessness preserved). No mutable policy state persists between requests. No internal impossibility semantics are exposed externally. Resolved in commit `d958996`.
+1. **Stub AB-S** — The public runner still uses `stub_ab` by default to
+demonstrate interface form. Private enterprise wiring may delegate authorization
+to the real Anathema-Breaker core, but that dependency path is intentionally not
+present in the public manifest.
 
 ---
 
-## Deployment Warning: Runner ≠ Full Canon
+## Deployment Warning: Runner != Full Canon
 
-The slime-runner harness now embeds the real AB-S engine but does not yet implement the full canon specification.
+The public `slime-runner` harness validates interface form with `stub_ab` and
+does not implement the full canon specification.
 
 **Remaining gaps:**
 
+- Public checkout does not ship the private real AB-S dependency path
 - Ignores payload entirely (no validation, no size check)
 - Flattens all errors to IMPOSSIBLE (no distinction between format errors and true impossibilities)
 - No cross-request saturation model (no SEALED terminal state)
@@ -68,19 +74,20 @@ The slime-runner harness now embeds the real AB-S engine but does not yet implem
 
 **To achieve full SLIME canon compliance:**
 
-1. ~~Replace the stub AB-S with a sealed, compile-time law~~ **Done** (Phase 6.3, commit `d958996`)
+1. Provide private enterprise wiring for the real AB-S engine outside the public manifest
 2. Implement full ingress validation (payload base64, size limits, HTTP status codes per canon)
 3. Deploy FirePlank-Guard (ACTUATOR_TCB.md) for binary integrity verification
-4. Verify conformance against `specs/` — not against the runner
+4. Verify conformance against `specs/` - not against the runner
 
 ---
 
 ## How to Read This Document
 
 - If you are **auditing SLIME**, use `specs/` as the sole authority.
-- If you are **testing the harness**, expect the divergences listed above.
+- If you are **testing the public harness**, expect the divergences listed above and the default `stub_ab` resolver.
+- If you need MB01-MB05 or real AB-S wiring, that is private enterprise validation outside the default public path.
 - If you are **deploying enterprise**, the systemd model in `noncanon/enterprise/` is the reference.
-- If you are **evaluating security posture**, the runner with real AB-S provides structural authorization guarantees. Full conformance additionally requires payload validation and FirePlank-Guard integrity.
+- If you are **evaluating security posture**, do not treat the public harness as proof of enterprise AB-S integration. Full conformance additionally requires payload validation, private engine wiring, and FirePlank-Guard integrity.
 
 **No divergence listed here modifies the canon.**
 

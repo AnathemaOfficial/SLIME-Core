@@ -5,10 +5,9 @@ edition = "2021"
 description = "SLIME reference runner — sealed law-layer execution environment"
 license = "Apache-2.0"
 
-[dependencies]
-anathema_breaker_core = { path = "/data/repos/AnathemaOfficial/Anathema-Breaker", optional = true }
-
 [features]
 default = ["stub_ab"]
 stub_ab = []
-real_ab = ["dep:anathema_breaker_core"]
+real_ab = []
+private_validation = []
+integration_demo = []

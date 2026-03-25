@@ -1,3 +1,5 @@
+#![cfg(all(feature = "private_validation", unix))]
+
 // M-B01 — Zero Runtime Configuration (Controlled Mode)
 //
 // Proves: binary can be spawned under env_clear.
@@ -13,6 +15,7 @@ fn bin_path_enterprise() -> String {
 }
 
 #[test]
+#[ignore = "requires private enterprise binary wiring"]
 fn mb01_controlled_env_clear_spawn() {
     let mut cmd = Command::new(bin_path_enterprise());
     cmd.env_clear()

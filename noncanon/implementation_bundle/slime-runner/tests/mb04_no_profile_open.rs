@@ -1,3 +1,5 @@
+#![cfg(all(feature = "private_validation", unix))]
+
 // M-B04 — No Runtime Policy Load (Critical)
 //
 // Proves: CoreSpec binary does not open, mmap, or parse any policy/profile
@@ -42,6 +44,7 @@ const SYSTEM_ALLOWLIST: &[&str] = &[
 ];
 
 #[test]
+#[ignore = "requires strace and enterprise CoreSpec artifact"]
 fn mb04_no_profile_open_strace_boot() {
     let out = Command::new("bash")
         .arg("scripts/run_strace_boot.sh")

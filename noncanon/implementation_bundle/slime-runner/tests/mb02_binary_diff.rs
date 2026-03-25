@@ -1,3 +1,5 @@
+#![cfg(all(feature = "private_validation", unix))]
+
 // M-B02 — CoreSpec Binary Identity
 //
 // Proves: enterprise and agent CoreSpecs produce distinct binary artifacts.
@@ -16,6 +18,7 @@ fn hash_file(p: &Path) -> String {
 }
 
 #[test]
+#[ignore = "requires enterprise and agent CoreSpec artifacts built outside the public harness"]
 fn mb02_binary_diff_enterprise_vs_agent() {
     let ent = Path::new("target/release/slime-core-enterprise");
     let agt = Path::new("target/release/slime-core-agent");

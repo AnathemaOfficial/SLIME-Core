@@ -3,12 +3,5 @@
 version = 4
 
 [[package]]
-name = "anathema_breaker_core"
-version = "0.1.0"
-
-[[package]]
 name = "slime-runner"
 version = "0.3.0"
-dependencies = [
- "anathema_breaker_core",
-]

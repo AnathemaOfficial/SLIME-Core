@@ -1,3 +1,5 @@
+#![cfg(all(feature = "private_validation", unix))]
+
 // M-B05 — Boot Ordering Invariant (Structural)
 //
 // Proves: ingress does not bind/accept before egress validation succeeds.
@@ -26,6 +28,7 @@ fn try_connect(addr: SocketAddr, timeout: Duration) -> bool {
 }
 
 #[test]
+#[ignore = "requires enterprise CoreSpec artifact and Unix runtime semantics"]
 fn mb05_ingress_must_not_bind_when_egress_missing() {
     // Ensure egress socket is absent before spawning
     let _ = std::fs::remove_file("/run/slime/egress.sock");

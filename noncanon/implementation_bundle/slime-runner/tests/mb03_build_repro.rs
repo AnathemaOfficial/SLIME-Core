@@ -1,3 +1,5 @@
+#![cfg(all(feature = "private_validation", unix))]
+
 // M-B03 — Reproducible Build
 //
 // Proves: three consecutive clean builds from the same source produce identical hashes.
@@ -31,6 +33,7 @@ fn extract_hash(output: &str) -> String {
 }
 
 #[test]
+#[ignore = "requires bash scripts and enterprise CoreSpec build pipeline"]
 fn mb03_build_repro_three_times_same_hash_enterprise() {
     // Log toolchain for CI traceability
     if let Ok(out) = Command::new("rustc").arg("--version").output() {

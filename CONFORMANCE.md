@@ -25,7 +25,7 @@
 | **Egress: socket ownership** | Actuator owns socket (server/listener); SLIME connects as client | SLIME connects as client (fail-closed if absent) | `actuator.service` creates socket; `slime.service` requires it |
 | **Egress: socket path** | `/run/slime/egress.sock` (hardcoded) | `/run/slime/egress.sock` | Same |
 | **Egress: socket perms** | `0660`, owner `actuator`, group `slime-actuator` | Best-effort `0660` by actuator-min | Actuator creates socket; systemd `RuntimeDirectory` ensures `/run/slime` exists; permissions enforced by actuator + unit config |
-| **Domain normalization** | `hash64(domain) & 0xFFFFFFFF` (32-bit mask) | Static compile-time table: string → `Domain(u16)`. Unknown domains → IMPOSSIBLE. No hash. | Same as runner |
+| **Domain normalization** | `domain` string → `u64` domain_id (R-7: no truncation) | Static compile-time table: string → `Domain(u16)`. Unknown domains → IMPOSSIBLE. No hash. | Same as runner |
 | **Saturation states** | SATURATED, then SEALED (terminal) | Not modeled (per-request budget prevents cross-request depletion) | Not modeled |
 | **Backpressure** | Kernel buffer fills, writes block, no bypass | Same (inherited from OS) | Same |
 | **Dashboard** | N/A (out of law scope) | Not implemented | Read-only on port 8081 if deployed (`noncanon/enterprise/dashboard`) |
@@ -43,7 +43,19 @@ The following divergences are **intentional** and expected in the noncanon harne
 
 3. **No saturation/sealed states** — The runner does not model cumulative capacity exhaustion across requests. Canon defines terminal SEALED state when the system can no longer authorize actions. The runner uses a fresh per-request Budget, so capacity accounting exists within a single request but no cross-request depletion occurs.
 
-4. **Domain table vs hash** — Canon specifies `hash64(domain) & 0xFFFFFFFF` (32-bit mask) for domain normalization. The runner uses a static compile-time table mapping domain strings to `Domain(u16)`. This is a deliberate choice: table-based resolution is more auditable than hash-based. The mapping is sealed at compile time and unknown domains are structurally impossible.
+4. **Domain table vs hash** — Canon allows `u64` domain identifiers via stable hash or compile-time table (R-7: no truncation). The runner uses a static compile-time table mapping domain strings to `Domain(u16)`. This is a deliberate choice: table-based resolution is more auditable than hash-based. The mapping is sealed at compile time and unknown domains are structurally impossible.
+
+5. **Magnitude zero rejection** — Canon specifies magnitude range `1..2^64-1`. The runner additionally rejects magnitudes exceeding `u32::MAX` because the stub resolver uses `Magnitude(u32)`. Canon allows the full `u64` range.
+
+6. **Actuation token generation** — Canon states the `actuation_token` field carries authorization metadata and the actuator bridge must verify authenticity. The runner generates a non-zero token from a monotonic counter XOR'd with domain/magnitude. This is NOT cryptographic — a real deployment should use HMAC or similar.
+
+7. **Egress write failure** — Canon says "No retry or recovery mechanism exists." As of v0.4.0, the runner complies: write failure exits the process immediately (fail-closed). Prior versions (≤ v0.3.x) silently reconnected and retried once — this was a spec violation.
+
+8. **AUTHORIZED response missing effect_id** — Canon specifies `{"status":"AUTHORIZED","effect_id":"<UUID>"}`. The runner returns only `{"status":"AUTHORIZED"}` — no `effect_id`. This is an intentional simplification in the harness.
+
+9. **Content-Type enforcement** — Canon does not mandate `Content-Type: application/json`. As of v0.4.0, the runner enforces it. Requests without `application/json` content type are rejected.
+
+10. **integration_demo env var** — V1_INVARIANTS §2 states "MUST NOT read environment variables." The `integration_demo` feature reads `SLIME_DEMO_EGRESS_FILE` from the environment. This is acknowledged as a noncanon divergence for demo purposes only.
 
 ---
 

@@ -62,12 +62,19 @@ The absence of effect is terminal.
 
 Upstream systems may generate any a ∈ A.
 
-SLIME imposes no constraint on attempt generation.
+SLIME imposes no **semantic** constraint on attempt generation.
 
 SLIME governs only effect manifestation.
 
-Attempts are unconstrained.
+Attempts are semantically unconstrained.
 Effects are bounded.
+
+> **Clarification (2026-04-15):** §6 specifies that malformed `a ∉ A`
+> are rejected at ingress. This is a **format** constraint (schema
+> enforcement), not a semantic constraint. The distinction is:
+> format constraints ensure `a ∈ A` (well-formed); semantic constraints
+> would evaluate whether `a` *should* be authorized. SLIME enforces the
+> former; AB-S enforces the latter.
 
 ---
 
@@ -94,9 +101,19 @@ Malformed or undefined a ∉ A are rejected.
 
 Egress applies Φ(e) only if e ∈ E.
 
-If Φ(e) cannot be executed, the result is ∅.
+If Φ(e) cannot be executed (actuator failure), the result is ∅.
 
 No partial effect is allowed.
+
+> **Three-valued observation note (2026-04-15):** The formal model
+> defines two observable states: `S(a) = e` (AUTHORIZED) and `S(a) = ∅`
+> (IMPOSSIBLE). However, an authorized effect whose actuation fails
+> (e.g., egress socket disconnected) produces a third observable case:
+> authorization granted, effect dropped. From the **external observer's**
+> perspective this is indistinguishable from IMPOSSIBLE — the binary
+> interface is preserved. From the **internal audit** perspective it is
+> a distinct failure mode. Implementations MUST log actuation failures
+> as audit events distinct from impossibilities.
 
 ---
 

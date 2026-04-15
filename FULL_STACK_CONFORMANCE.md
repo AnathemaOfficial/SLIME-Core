@@ -52,6 +52,28 @@ Monotonicity (action space ↓)    Shield + AB      Capacity only decreases, nev
 
 ---
 
+## 2b) Implementation Notes (added 2026-04-15, post-tordeur)
+
+The following implementation patterns were established during the SAFA
+adversarial audit cycle and are recorded here for conformance guidance:
+
+**Per-agent workspace isolation:** In multi-agent deployments (SAFA P3),
+each agent operates in an isolated subdirectory (`workspace_root/{agent_id}`).
+Shell intents SHOULD use `{{agent_workspace}}` (resolved at runtime) rather
+than `{{workspace_root}}` (global, shared). Intents using the global
+workspace MUST emit a boot-time warning.
+
+**TOCTOU re-validation on file operations:** After `create_dir_all()`,
+implementations MUST re-canonicalize the created parent and re-verify it
+remains under the effective workspace root. This closes the
+intermediate-directory symlink-swap race between validation and creation.
+
+**Platform scope:** Structural guarantees in §2 assume Unix (Linux). On
+Windows, `verify_no_symlinks` is a no-op and `shell_exec` is unavailable.
+See `ARCHITECTURE_SECURITY_MODEL.md` §10 for details.
+
+---
+
 ## 3) Oracle / Feedback Rules (hard requirements)
 
 ### R-1: Reason codes are audit-only

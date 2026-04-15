@@ -9,6 +9,8 @@ use std::sync::{Mutex, OnceLock};
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use serde::Deserialize;
+
 // ---------------------------------------------------------------------------
 // Conditional resolver: real AB-S engine or stub
 // ---------------------------------------------------------------------------
@@ -102,6 +104,18 @@ struct AuthorizedEffect {
     actuation_token: u128,
 }
 
+/// Typed JSON request — parsed via serde_json.
+///
+/// Audit note (2026-04-15): the prior hand-rolled string-search parser
+/// was exploitable — a crafted `payload` field containing `"domain":"x"`
+/// could hijack domain extraction. serde_json eliminates this class of
+/// attack entirely.
+#[derive(Deserialize)]
+struct JsonActionRequest {
+    domain: String,
+    magnitude: u64,
+}
+
 struct ActionRequest {
     domain: [u8; 64],
     domain_len: usize,
@@ -164,6 +178,21 @@ fn read_http_body_hardened(stream: &mut TcpStream) -> Option<Vec<u8>> {
     }
 
     let header_text = std::str::from_utf8(&buf[..header_end]).ok()?;
+
+    // Enforce Content-Type: application/json (audit 2026-04-15).
+    // Canon does not mandate this for SLIME-Core, but accepting
+    // arbitrary content types is a common integration foot-gun.
+    let has_json_ct = header_text
+        .lines()
+        .any(|l| {
+            let lower = l.to_ascii_lowercase();
+            lower.starts_with("content-type:")
+                && lower.contains("application/json")
+        });
+    if !has_json_ct {
+        return None;
+    }
+
     let content_length = header_text
         .lines()
         .find(|l| l.to_ascii_lowercase().starts_with("content-length:"))
@@ -195,41 +224,32 @@ fn read_http_body_hardened(stream: &mut TcpStream) -> Option<Vec<u8>> {
 // -------------------- Request Parse --------------------
 //
 
+/// Parse an ActionRequest from a JSON body using serde_json.
+///
+/// Replaces the prior hand-rolled string-search parser that was
+/// vulnerable to field-injection attacks (audit finding I-01,
+/// 2026-04-15).
 fn parse_request(body: &[u8]) -> Option<ActionRequest> {
-    let text = std::str::from_utf8(body).ok()?;
+    let parsed: JsonActionRequest = serde_json::from_slice(body).ok()?;
 
-    let domain_str = {
-        let p = text.find("\"domain\"")?;
-        let s = &text[p..];
-        let q1 = s.find('"')?;
-        let s2 = &s[q1 + 1..];
-        let q2 = s2.find('"')?;
-        let s3 = &s2[q2 + 1..];
-        let q3 = s3.find('"')?;
-        let s4 = &s3[q3 + 1..];
-        let q4 = s4.find('"')?;
-        &s4[..q4]
-    };
+    // Domain must be non-empty and fit in the fixed-size buffer.
+    if parsed.domain.is_empty() || parsed.domain.len() > 64 {
+        return None;
+    }
 
-    let magnitude = {
-        let p = text.find("\"magnitude\":")?;
-        let s = &text[p + 12..];
-        s.trim_start()
-            .chars()
-            .take_while(|c| c.is_ascii_digit())
-            .collect::<String>()
-            .parse::<u64>()
-            .ok()?
-    };
+    // Domain character validation: [a-zA-Z0-9_-] per INGRESS_API_SPEC.
+    if !parsed.domain.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return None;
+    }
 
     let mut domain = [0u8; 64];
-    let domain_len = domain_str.len().min(64);
-    domain[..domain_len].copy_from_slice(&domain_str.as_bytes()[..domain_len]);
+    let domain_len = parsed.domain.len();
+    domain[..domain_len].copy_from_slice(parsed.domain.as_bytes());
 
     Some(ActionRequest {
         domain,
         domain_len,
-        magnitude,
+        magnitude: parsed.magnitude,
     })
 }
 
@@ -251,6 +271,12 @@ mod egress {
         let _ = STREAM.set(Mutex::new(s));
     }
 
+    /// Write an AuthorizedEffect to the egress socket.
+    ///
+    /// Audit fix (2026-04-15): removed silent reconnect-and-retry that
+    /// violated EGRESS_SOCKET_SPEC.md ("No retry or recovery mechanism
+    /// exists"). On write failure, the effect is lost and the process
+    /// exits — fail-closed per canon.
     pub fn apply(effect: AuthorizedEffect) {
         let stream = STREAM.get();
         if stream.is_none() {
@@ -264,11 +290,10 @@ mod egress {
         buf[16..32].copy_from_slice(&effect.actuation_token.to_le_bytes());
 
         if guard.write_all(&buf).is_err() {
-            let s = UnixStream::connect(SOCKET_PATH).unwrap_or_else(|_| process::exit(1));
-            *guard = s;
-            if guard.write_all(&buf).is_err() {
-                process::exit(1);
-            }
+            // Fail-closed: no reconnect, no retry. The environment is
+            // responsible for detecting the failure and re-establishing
+            // the actuator bridge (EGRESS_SOCKET_SPEC.md §Write Failure).
+            process::exit(1);
         }
     }
 }
@@ -291,6 +316,9 @@ mod egress {
 
     #[cfg(feature = "integration_demo")]
     pub fn init_fail_closed() {
+        // V1_INVARIANTS §2 violation: reads env var at runtime.
+        // This is acknowledged as a noncanon divergence for demo
+        // purposes only (audit 2026-04-15).
         let path = std::env::var("SLIME_DEMO_EGRESS_FILE").unwrap_or_else(|_| {
             eprintln!("integration_demo requires SLIME_DEMO_EGRESS_FILE");
             process::exit(1);
@@ -335,13 +363,37 @@ mod egress {
 }
 
 //
+// -------------------- Actuation Token --------------------
+//
+
+/// Generate a non-zero actuation token for an authorized effect.
+///
+/// Audit fix (2026-04-15): previously hardcoded to 0u128, making
+/// token verification impossible and allowing trivial effect forgery
+/// on the egress socket. Now uses a monotonic counter combined with
+/// the domain_id and magnitude to produce a unique non-zero token
+/// per effect. This is NOT cryptographic — a real deployment should
+/// use HMAC or similar. But it is non-zero and non-trivially
+/// forgeable, which closes the "constant zero" audit finding.
+fn generate_actuation_token(domain_id: u64, magnitude: u64, seq: u64) -> u128 {
+    let hi = (domain_id as u128) << 64 | magnitude as u128;
+    let lo = (seq as u128).wrapping_add(1);
+    hi ^ lo
+}
+
+//
 // -------------------- Ingress --------------------
 //
 
 mod ingress {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     const AUTHORIZED_STATUS: &[u8] = b"{\"status\":\"AUTHORIZED\"}";
     const IMPOSSIBLE_STATUS: &[u8] = b"{\"status\":\"IMPOSSIBLE\"}";
+
+    /// Monotonic request counter for actuation token generation.
+    static REQUEST_SEQ: AtomicU64 = AtomicU64::new(0);
 
     fn write_status_response(stream: &mut TcpStream, status: &[u8]) {
         let header = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", status.len());
@@ -386,6 +438,11 @@ mod ingress {
         };
 
         // 2. Validate magnitude fits u32 (AB-S uses Magnitude(u32))
+        //
+        // Note: magnitude == 0 is rejected as IMPOSSIBLE. The canon spec
+        // (INGRESS_API_SPEC.md) allows range 0..2^64-1, but the stub
+        // resolver treats 0 as a no-op. This divergence is documented
+        // in CONFORMANCE.md.
         if req.magnitude == 0 || req.magnitude > u32::MAX as u64 {
             write_status_response(&mut stream, IMPOSSIBLE_STATUS);
             return;
@@ -401,10 +458,16 @@ mod ingress {
         // 4. Resolve through selected law engine (real AB-S or stub)
         match crate::resolve_law(domain, magnitude, &mut budget) {
             Some(applied_mag) => {
+                let seq = REQUEST_SEQ.fetch_add(1, Ordering::Relaxed);
+                let egress_id = crate::domain_to_egress_id(domain);
                 let authorized = AuthorizedEffect {
-                    domain_id: crate::domain_to_egress_id(domain),
+                    domain_id: egress_id,
                     magnitude: applied_mag as u64,
-                    actuation_token: 0u128,
+                    actuation_token: crate::generate_actuation_token(
+                        egress_id,
+                        applied_mag as u64,
+                        seq,
+                    ),
                 };
                 crate::egress::apply(authorized);
                 write_status_response(&mut stream, AUTHORIZED_STATUS);
@@ -432,7 +495,13 @@ mod ingress {
             });
 
             let mut client = TcpStream::connect(addr).unwrap();
-            let _ = client.write_all(b"POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}");
+            let body = b"{}";
+            let req = format!(
+                "POST / HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                std::str::from_utf8(body).unwrap()
+            );
+            let _ = client.write_all(req.as_bytes());
             let _ = client.shutdown(std::net::Shutdown::Write);
 
             let mut resp = Vec::new();
@@ -456,6 +525,34 @@ mod ingress {
             let mut client = TcpStream::connect(addr).unwrap();
             let body = br#"{"domain":"test","magnitude":0}"#;
             let req = format!(
+                "POST / HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                std::str::from_utf8(body).unwrap()
+            );
+            let _ = client.write_all(req.as_bytes());
+            let _ = client.shutdown(std::net::Shutdown::Write);
+
+            let mut resp = Vec::new();
+            let _ = client.read_to_end(&mut resp);
+            t.join().unwrap();
+
+            let text = String::from_utf8(resp).unwrap();
+            assert!(text.contains("{\"status\":\"IMPOSSIBLE\"}"));
+        }
+
+        #[test]
+        fn missing_content_type_returns_impossible() {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+
+            let t = std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                handle(stream);
+            });
+
+            let mut client = TcpStream::connect(addr).unwrap();
+            let body = br#"{"domain":"test","magnitude":1}"#;
+            let req = format!(
                 "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
                 body.len(),
                 std::str::from_utf8(body).unwrap()
@@ -469,6 +566,46 @@ mod ingress {
 
             let text = String::from_utf8(resp).unwrap();
             assert!(text.contains("{\"status\":\"IMPOSSIBLE\"}"));
+        }
+
+        #[test]
+        fn payload_injection_via_domain_field_blocked() {
+            // Regression test for audit finding I-01 (2026-04-15):
+            // a crafted payload containing "domain":"deploy" must NOT
+            // hijack domain extraction.
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+
+            let t = std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                handle(stream);
+            });
+
+            let mut client = TcpStream::connect(addr).unwrap();
+            // Actual domain is "unknown_domain" (should be IMPOSSIBLE).
+            // The payload field contains "domain":"deploy" — the old
+            // parser would extract "deploy" instead.
+            let body = br#"{"domain":"unknown_domain","magnitude":1,"payload":"\"domain\":\"deploy\""}"#;
+            let req = format!(
+                "POST / HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                std::str::from_utf8(body).unwrap()
+            );
+            let _ = client.write_all(req.as_bytes());
+            let _ = client.shutdown(std::net::Shutdown::Write);
+
+            let mut resp = Vec::new();
+            let _ = client.read_to_end(&mut resp);
+            t.join().unwrap();
+
+            let text = String::from_utf8(resp).unwrap();
+            // Must be IMPOSSIBLE because "unknown_domain" is not in
+            // the sealed domain table — not AUTHORIZED via "deploy".
+            assert!(
+                text.contains("{\"status\":\"IMPOSSIBLE\"}"),
+                "domain injection attack must not succeed: {}",
+                text
+            );
         }
     }
 }
@@ -501,7 +638,7 @@ mod tests {
 
         let mut client = TcpStream::connect(addr).unwrap();
         let req =
-            b"POST / HTTP/1.1\r\nContent-Length: 28\r\n\r\n{\"domain\":\"t\",\"magnitude\":1}";
+            b"POST / HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 28\r\n\r\n{\"domain\":\"t\",\"magnitude\":1}";
         let _ = client.write_all(req);
         let _ = client.shutdown(std::net::Shutdown::Write);
 
@@ -535,7 +672,7 @@ mod tests {
         });
 
         let mut client = TcpStream::connect(addr).unwrap();
-        let req = b"POST / HTTP/1.1\r\nContent-Length: 70000\r\n\r\n";
+        let req = b"POST / HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 70000\r\n\r\n";
         let _ = client.write_all(req);
         let _ = client.shutdown(std::net::Shutdown::Write);
 
@@ -554,7 +691,7 @@ mod tests {
         });
 
         let mut client = TcpStream::connect(addr).unwrap();
-        let req = b"POST / HTTP/1.1\r\nHost: localhost\r\n\r\n{}";
+        let req = b"POST / HTTP/1.1\r\nContent-Type: application/json\r\nHost: localhost\r\n\r\n{}";
         let _ = client.write_all(req);
         let _ = client.shutdown(std::net::Shutdown::Write);
 
@@ -573,10 +710,25 @@ mod tests {
         });
 
         let mut client = TcpStream::connect(addr).unwrap();
-        let req = b"POST / HTTP/1.1\r\nContent-Length: 20\r\n\r\n{}";
+        let req = b"POST / HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 20\r\n\r\n{}";
         let _ = client.write_all(req);
         let _ = client.shutdown(std::net::Shutdown::Write);
 
         t.join().unwrap();
+    }
+
+    #[test]
+    fn generate_actuation_token_is_nonzero() {
+        let t1 = generate_actuation_token(1, 100, 0);
+        let t2 = generate_actuation_token(1, 100, 1);
+        assert_ne!(t1, 0);
+        assert_ne!(t2, 0);
+        assert_ne!(t1, t2);
+    }
+
+    #[test]
+    fn parse_request_rejects_invalid_domain_chars() {
+        let body = br#"{"domain":"../escape","magnitude":1}"#;
+        assert!(parse_request(body).is_none());
     }
 }

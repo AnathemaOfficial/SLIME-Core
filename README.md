@@ -55,6 +55,10 @@ See `FULL_STACK_CONFORMANCE.md` for cross-layer integration rules (Gate / Shield
 
 See `ARCHITECTURE_SECURITY_MODEL.md` for the full structural security model (monotonicity, irreversibility, binary enforcement, model limitations).
 
+See `SAFA_ADAPTER_MAPPING.md` for how SLIME-Core concepts map to SAFA's actual API surface.
+
+See `KNOWN_LIMITATIONS.md` for platform-specific and known security limitations.
+
 ---
 
 ## Formal Specification
@@ -295,10 +299,19 @@ cargo build
 ```
 
 This compiles with the default `stub_ab` feature — a standalone capacity-check
-resolver that demonstrates the SLIME interface without external dependencies.
+resolver that demonstrates the SLIME interface without `serde`/`serde_json`
+as the only external dependencies (used for safe JSON parsing).
+
+**Note:** The runner binds to `127.0.0.1:8080` and requires the egress
+socket at `/run/slime/egress.sock` to be present at startup (fail-closed).
+On non-Unix targets, use the `integration_demo` feature for file-based
+egress. See `CONFORMANCE.md` for intentional divergences from canon.
 
 For enterprise deployments with the real law engine, see
 [SLIME Enterprise](https://github.com/AnathemaOfficial/SLIME-Enterprise) (private).
+
+For the production multi-agent adapter, see
+[SAFA](https://github.com/AnathemaOfficial/SAFA) and `SAFA_ADAPTER_MAPPING.md`.
 
 ---
 

@@ -134,7 +134,20 @@ If deterministic hashing is used:
 - It MUST be compile-time generated.
 - It MUST NOT depend on runtime input.
 
-### 6.1 Domain Confidentiality Statement
+### 6.1 Platform Scope (added 2026-04-15)
+
+The Core SHOULD target Unix (Linux) for production deployments.
+
+On non-Unix platforms:
+- `shell_exec` actuator capabilities MAY be unavailable.
+- Filesystem symlink protection MAY be a no-op.
+- Process group isolation (`setpgid`) is unavailable.
+
+Implementations MUST document which structural guarantees are
+platform-dependent and MUST NOT claim full containment on platforms
+where OS-level primitives are absent.
+
+### 6.2 Domain Confidentiality Statement
 
 Domain mapping is NOT considered confidential.
 

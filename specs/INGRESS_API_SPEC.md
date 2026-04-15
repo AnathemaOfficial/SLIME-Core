@@ -61,8 +61,8 @@ SLIME does not provide remote access. If needed, use external infrastructure:
 
 **`magnitude` (number, required)**
 - Action magnitude (energy/capacity consumption)
-- Positive integer
-- Range: `0` to `2^64-1`
+- Positive integer (> 0)
+- Range: `1` to `2^64-1`
 - Floating point values are rounded down
 
 **`payload` (string, optional)**
@@ -157,10 +157,17 @@ Impossibilities return 200 with `"status": "IMPOSSIBLE"`.
 
 SLIME performs **strict normalization** on ingress:
 
-1. `domain` string → `domain_id` (64-bit hash via stable hash function)
+1. `domain` string → `domain_id` (`u64` via stable hash function or compile-time table)
 2. `magnitude` float → truncate to `u64`
 3. `payload` base64 → binary buffer
-4. Domain ID masked to 32-bit: `domain_id & 0xFFFFFFFF`
+
+**Domain ID width:** Domain IDs are `u64` end-to-end per `FULL_STACK_CONFORMANCE.md` R-7.
+No truncation to `u32`/`u16` is permitted anywhere in the pipeline.
+
+> **Errata (2026-04-15):** Prior versions of this spec included a 32-bit mask
+> (`domain_id & 0xFFFFFFFF`). This contradicted R-7 and has been removed.
+> Implementations using compile-time domain tables (e.g., slime-runner) map
+> domain strings directly to `u64` values without hashing.
 
 **No semantic validation** - SLIME does not interpret domain names or payload content.  
 **No business logic** - SLIME does not validate intent, correctness, or feasibility.  

@@ -1,6 +1,10 @@
+
+
 # SLIME-Core
 
 **SLIME-Core** is the canonical kernel of the SLIME model.
+
+**Systemic Law Invariant Machine Environnement**
 
 It defines a **structural law layer** where certain classes of effects become **unrepresentable** by construction.
 

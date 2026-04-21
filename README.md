@@ -176,6 +176,29 @@ Recommended approach:
 
 ---
 
+## Building the Reference Runner
+
+```bash
+cd noncanon/implementation_bundle/slime-runner
+cargo build
+```
+
+This compiles with the default `stub_ab` feature — a standalone capacity-check resolver that demonstrates the SLIME interface. `serde` / `serde_json` are the only external dependencies (used for safe JSON parsing).
+
+**Runtime expectations:**
+
+- The runner binds to `127.0.0.1:8080`
+- The egress socket at `/run/slime/egress.sock` must be present at startup (fail-closed)
+- On non-Unix targets, use the `integration_demo` feature for file-based egress
+- See `CONFORMANCE.md` for intentional divergences between the reference runner and the canonical specification
+
+**Related repositories:**
+
+- [SAFA](https://github.com/AnathemaOfficial/SAFA) — complementary public foundation (policy layer for autonomous agents and LLM tool-use)
+- [SLIME-Enterprise](https://github.com/AnathemaOfficial/SLIME-Enterprise) — enterprise actuator membrane (private)
+
+---
+
 ## Status
 
 Active development.
@@ -190,3 +213,9 @@ SLIME-Core is a foundational model and may evolve as its formalization improves.
 > Remove the ability to express it.
 
 SLIME-Core is an attempt to encode that idea precisely.
+
+---
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).

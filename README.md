@@ -1,4 +1,4 @@
-
+<img width="1199" height="349" alt="SLIME logo 2" src="https://github.com/user-attachments/assets/9ff555b7-0b0d-468d-9758-1f0e81788b4d" />
 
 # SLIME-Core
 

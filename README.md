@@ -4,14 +4,54 @@
 
 **Systemic Law Invariant Machine Environnement**
 
-**SLIME-Core** is the canonical kernel of the SLIME model.
+**SLIME-Core** is the **canonical execution membrane** of the SYF ecosystem,
+built from the Anathema-Breaker sealed resolution core.
 
-It defines a **structural law layer** where certain classes of effects become **unrepresentable by construction**.
+It is the public executable foundation that carries AB to the point of effect.
+Downstream membranes and product assemblies (SLIME-Enterprise, SAFA, SLIME-APP,
+and others) are derived from SLIME-Core — not from upstream law directly.
 
-This repository exists to make that law:
+This repository exists to make the execution membrane:
 - explicit
 - inspectable
 - verifiable
+
+**AB is the heart. SLIME-Core is the membrane.**
+
+---
+
+## Canonical Lineage
+
+Canonical chronology of the ecosystem:
+
+1. **SYF-Core** — upstream thermodynamic theory (`R = (F × E) / K`)
+2. **SYF-Gate** — structural admissibility primitive
+3. **SYF-Shield** — capacity, progression, and irreversibility primitive
+4. **Anathema-Breaker** — sealed synthesis of Gate + Shield into a resolution core
+5. **SLIME-Core** — canonical execution membrane built from that core (this repo)
+
+SLIME-Core is **not** the origin of the law. It is a **downstream derivation of
+Anathema-Breaker** that makes the sealed resolution core executable at the point
+of actuation.
+
+- **Anathema-Breaker** provides the sealed resolution core.
+- **SLIME-Core** provides the executable binary membrane that carries that core
+  to the point of effect.
+
+See `ARCHITECTURE_SECURITY_MODEL.md` for the full per-layer security model.
+
+---
+
+## Naming Convention
+
+To avoid ambiguity across the ecosystem:
+
+- **SLIME-Core** — the canonical public name of this repository and foundation,
+  used whenever distinguishing it from downstream derivatives (SLIME-Enterprise,
+  SAFA, SLIME-APP).
+- **SLIME v0** — a specific sealed canonical version of SLIME-Core.
+- **SLIME** — tolerated shorthand. Prefer **SLIME-Core** in canonical and
+  cross-repo references.
 
 ---
 

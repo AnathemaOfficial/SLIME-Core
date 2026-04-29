@@ -1,5 +1,4 @@
-<img width="1199" height="349" alt="SLIME logo 2" src="https://github.com/user-attachments/assets/9ff555b7-0b0d-468d-9758-1f0e81788b4d" />
-
+<img width="2002" height="566" alt="slime core" src="https://github.com/user-attachments/assets/81df23bc-f601-4f54-b18e-6b574328be69" />
 # SLIME-Core
 
 **Systemic Law Invariant Machine Environnement**
